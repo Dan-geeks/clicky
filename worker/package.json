@@ -1,5 +1,5 @@
 {
-  "name": "clicky-proxy",
+  "name": "buddy-proxy",
   "private": true,
   "scripts": {
     "dev": "wrangler dev",

@@ -1,0 +1,317 @@
+<Window x:Class="Buddy.Windows.Overlay.CompanionOverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Buddy Overlay"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowActivated="False"
+        ShowInTaskbar="False"
+        Topmost="True"
+        UseLayoutRounding="True"
+        TextOptions.TextRenderingMode="ClearType"
+        RenderOptions.BitmapScalingMode="Fant"
+        IsHitTestVisible="False">
+    <Window.Resources>
+        <DropShadowEffect x:Key="CursorGlowEffect"
+                          BlurRadius="14"
+                          Color="#2B7CFF"
+                          Opacity="0.58"
+                          ShadowDepth="0" />
+        <DropShadowEffect x:Key="CursorLabelShadowEffect"
+                          BlurRadius="18"
+                          Color="#000000"
+                          Opacity="0.34"
+                          ShadowDepth="6" />
+    </Window.Resources>
+
+    <Canvas x:Name="OverlayCanvas"
+            Background="Transparent"
+            IsHitTestVisible="False">
+        <Grid x:Name="CompanionRoot"
+              Width="320"
+              MinHeight="104"
+              Opacity="0"
+              IsHitTestVisible="False">
+            <Grid.RenderTransform>
+                <TranslateTransform x:Name="CompanionRootTranslate" />
+            </Grid.RenderTransform>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="48" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Grid x:Name="CursorDecoration"
+                  Width="48"
+                  Height="58"
+                  VerticalAlignment="Top"
+                  Margin="0,6,0,0">
+                <Ellipse Width="26"
+                         Height="26"
+                         Fill="#2B7CFF"
+                         Opacity="0.14"
+                         HorizontalAlignment="Left"
+                         Margin="0,1,0,0"
+                         VerticalAlignment="Top" />
+                <Path Data="M 6,2 L 6,43 L 17,33 L 24,52 L 33,48 L 26,30 L 42,30 Z"
+                      Fill="#2B7CFF"
+                      Stroke="#F4FAFF"
+                      StrokeThickness="1.6"
+                      StrokeLineJoin="Round"
+                      HorizontalAlignment="Left"
+                      VerticalAlignment="Top"
+                      RenderTransformOrigin="0,0">
+                    <Path.RenderTransform>
+                        <ScaleTransform ScaleX="0.72" ScaleY="0.72" />
+                    </Path.RenderTransform>
+                </Path>
+                <Path Data="M 11,10 L 11,31 L 17,25 L 22,39"
+                      Stroke="#9DCAFF"
+                      StrokeThickness="1.2"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round"
+                      StrokeLineJoin="Round"
+                      Fill="Transparent"
+                      Opacity="0.72"
+                      HorizontalAlignment="Left"
+                      VerticalAlignment="Top"
+                      RenderTransformOrigin="0,0">
+                    <Path.RenderTransform>
+                        <ScaleTransform ScaleX="0.72" ScaleY="0.72" />
+                    </Path.RenderTransform>
+                </Path>
+            </Grid>
+
+            <Border x:Name="CompanionContentBorder"
+                    Grid.Column="2"
+                    Background="#E614171C"
+                    BorderBrush="#663F4856"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    Padding="14">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="24"
+                                      Color="#000000"
+                                      Opacity="0.38"
+                                      ShadowDepth="8" />
+                </Border.Effect>
+
+                <StackPanel>
+                    <Grid>
+                        <TextBlock x:Name="StatusTextBlock"
+                                   Text="Ready"
+                                   Foreground="#F5F7FB"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap"
+                                   VerticalAlignment="Center" />
+                        <StackPanel x:Name="ThinkingDotsPanel"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Visibility="Collapsed">
+                            <Ellipse x:Name="ThinkingDotOne"
+                                     Width="10"
+                                     Height="10"
+                                     Fill="#7FB6FF"
+                                     Margin="0,0,8,0"
+                                     RenderTransformOrigin="0.5,0.5">
+                                <Ellipse.RenderTransform>
+                                    <TranslateTransform x:Name="ThinkingDotOneTransform" Y="0" />
+                                </Ellipse.RenderTransform>
+                            </Ellipse>
+                            <Ellipse x:Name="ThinkingDotTwo"
+                                     Width="10"
+                                     Height="10"
+                                     Fill="#7FB6FF"
+                                     Margin="0,0,8,0"
+                                     RenderTransformOrigin="0.5,0.5">
+                                <Ellipse.RenderTransform>
+                                    <TranslateTransform x:Name="ThinkingDotTwoTransform" Y="0" />
+                                </Ellipse.RenderTransform>
+                            </Ellipse>
+                            <Ellipse x:Name="ThinkingDotThree"
+                                     Width="10"
+                                     Height="10"
+                                     Fill="#7FB6FF"
+                                     RenderTransformOrigin="0.5,0.5">
+                                <Ellipse.RenderTransform>
+                                    <TranslateTransform x:Name="ThinkingDotThreeTransform" Y="0" />
+                                </Ellipse.RenderTransform>
+                            </Ellipse>
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock x:Name="DetailTextBlock"
+                               Text="Ctrl + Alt"
+                               Foreground="#A6B0C2"
+                               FontSize="12"
+                               Margin="0,4,0,0"
+                               TextWrapping="Wrap" />
+                    <Border x:Name="AudioLevelTrack"
+                            Width="190"
+                            Height="5"
+                            Background="#29303A"
+                            CornerRadius="2.5"
+                            Margin="0,10,0,0"
+                            HorizontalAlignment="Left"
+                            ClipToBounds="True">
+                        <Border x:Name="AudioLevelFill"
+                                Width="0"
+                                Height="5"
+                                Background="#2B7CFF"
+                                CornerRadius="2.5"
+                                HorizontalAlignment="Left" />
+                    </Border>
+                    <TextBlock x:Name="TranscriptTextBlock"
+                               Foreground="#8D97AA"
+                               FontSize="12"
+                               LineHeight="16"
+                               Margin="0,10,0,0"
+                               MaxHeight="48"
+                               TextWrapping="Wrap"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="ResponseTextBlock"
+                               Foreground="#D7DCE7"
+                               FontSize="12"
+                               LineHeight="16"
+                               Margin="0,8,0,0"
+                               MaxHeight="86"
+                               TextWrapping="Wrap"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Grid x:Name="FollowerCursorRoot"
+              Width="44"
+              Height="46"
+              Opacity="0"
+              IsHitTestVisible="False">
+            <Grid.RenderTransform>
+                <TranslateTransform x:Name="FollowerCursorTranslate" />
+            </Grid.RenderTransform>
+            <Ellipse Width="24"
+                     Height="24"
+                     Fill="#2B7CFF"
+                     Opacity="0.14"
+                     HorizontalAlignment="Left"
+                     Margin="0,1,0,0"
+                     VerticalAlignment="Top" />
+            <Path Data="M 6,2 L 6,43 L 17,33 L 24,52 L 33,48 L 26,30 L 42,30 Z"
+                  Fill="#2B7CFF"
+                  Stroke="#F4FAFF"
+                  StrokeThickness="1.6"
+                  StrokeLineJoin="Round"
+                  HorizontalAlignment="Left"
+                  VerticalAlignment="Top"
+                  RenderTransformOrigin="0,0"
+                  Effect="{StaticResource CursorGlowEffect}">
+                <Path.RenderTransform>
+                    <ScaleTransform ScaleX="0.68" ScaleY="0.68" />
+                </Path.RenderTransform>
+            </Path>
+            <Path Data="M 11,10 L 11,31 L 17,25 L 22,39"
+                  Stroke="#9DCAFF"
+                  StrokeThickness="1.2"
+                  StrokeStartLineCap="Round"
+                  StrokeEndLineCap="Round"
+                  StrokeLineJoin="Round"
+                  Fill="Transparent"
+                  Opacity="0.72"
+                  HorizontalAlignment="Left"
+                  VerticalAlignment="Top"
+                  RenderTransformOrigin="0,0">
+                <Path.RenderTransform>
+                    <ScaleTransform ScaleX="0.68" ScaleY="0.68" />
+                </Path.RenderTransform>
+            </Path>
+        </Grid>
+
+        <Grid x:Name="PointingCursorRoot"
+              Width="248"
+              Height="92"
+              Opacity="0"
+              IsHitTestVisible="False">
+            <Grid.RenderTransform>
+                <TranslateTransform x:Name="PointingCursorTranslate" />
+            </Grid.RenderTransform>
+
+            <Grid x:Name="PointingCursorGlyph"
+                  Width="44"
+                  Height="48"
+                  HorizontalAlignment="Left"
+                  VerticalAlignment="Top"
+                  RenderTransformOrigin="0,0">
+                <Grid.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform x:Name="PointingCursorScale"
+                                        ScaleX="1"
+                                        ScaleY="1"
+                                        CenterX="5"
+                                        CenterY="2" />
+                        <RotateTransform x:Name="PointingCursorRotate"
+                                         Angle="0"
+                                         CenterX="5"
+                                         CenterY="2" />
+                    </TransformGroup>
+                </Grid.RenderTransform>
+                <Path Data="M 6,2 L 6,43 L 17,33 L 24,52 L 33,48 L 26,30 L 42,30 Z"
+                      Fill="#2B7CFF"
+                      Stroke="#F4FAFF"
+                      StrokeThickness="1.6"
+                      StrokeLineJoin="Round"
+                      HorizontalAlignment="Left"
+                      VerticalAlignment="Top"
+                      RenderTransformOrigin="0,0">
+                    <Path.RenderTransform>
+                        <ScaleTransform ScaleX="0.76" ScaleY="0.76" />
+                    </Path.RenderTransform>
+                    <Path.Effect>
+                        <DropShadowEffect x:Name="PointingCursorGlowEffect"
+                                          BlurRadius="14"
+                                          Color="#2B7CFF"
+                                          Opacity="0.58"
+                                          ShadowDepth="0" />
+                    </Path.Effect>
+                </Path>
+                <Path Data="M 11,10 L 11,31 L 17,25 L 22,39"
+                      Stroke="#9DCAFF"
+                      StrokeThickness="1.2"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round"
+                      StrokeLineJoin="Round"
+                      Fill="Transparent"
+                      Opacity="0.72"
+                      HorizontalAlignment="Left"
+                      VerticalAlignment="Top"
+                      RenderTransformOrigin="0,0">
+                    <Path.RenderTransform>
+                        <ScaleTransform ScaleX="0.76" ScaleY="0.76" />
+                    </Path.RenderTransform>
+                </Path>
+            </Grid>
+            <Border x:Name="PointingLabelBorder"
+                    Background="#F02B7CFF"
+                    BorderBrush="#BFD7FF"
+                    BorderThickness="1"
+                    CornerRadius="7"
+                    Padding="9,6"
+                    Margin="42,4,0,0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    MaxWidth="218"
+                    Effect="{StaticResource CursorLabelShadowEffect}">
+                <TextBlock x:Name="PointingLabelTextBlock"
+                           Foreground="#F5F7FB"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           LineHeight="15"
+                           MaxHeight="64"
+                           TextTrimming="CharacterEllipsis"
+                           TextWrapping="Wrap" />
+            </Border>
+        </Grid>
+    </Canvas>
+</Window>

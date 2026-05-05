@@ -1,0 +1,84 @@
+<Window x:Class="Buddy.Windows.TextInput.TextPromptWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Ask Buddy"
+        Width="380"
+        Height="178"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowActivated="True"
+        ShowInTaskbar="False"
+        Topmost="True">
+    <Border Background="#F214171C"
+            BorderBrush="#3F4856"
+            BorderThickness="1"
+            CornerRadius="14"
+            Padding="14">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="24"
+                              Color="#000000"
+                              Opacity="0.38"
+                              ShadowDepth="8" />
+        </Border.Effect>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock x:Name="PromptHeaderTextBlock"
+                       Text="Ask Buddy"
+                       Foreground="#F5F7FB"
+                       FontSize="14"
+                       FontWeight="SemiBold" />
+
+            <Border Grid.Row="1"
+                    Background="#10141B"
+                    BorderBrush="#2A303A"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="8"
+                    Margin="0,10,0,10">
+                <TextBox x:Name="PromptTextBox"
+                         AcceptsReturn="True"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         CaretBrush="#FFFFFF"
+                         Foreground="#D7DCE7"
+                         FontSize="13"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"
+                         PreviewKeyDown="HandlePromptTextBoxPreviewKeyDown" />
+            </Border>
+
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Text="Enter sends, Esc closes"
+                           Foreground="#6B7585"
+                           FontSize="11"
+                           VerticalAlignment="Center" />
+
+                <Button Grid.Column="1"
+                        Content="Cancel"
+                        Click="HandleCancelButtonClick"
+                        Padding="12,6"
+                        Cursor="Hand" />
+                <Button Grid.Column="3"
+                        Content="Send"
+                        Click="HandleSendButtonClick"
+                        Padding="14,6"
+                        Cursor="Hand" />
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

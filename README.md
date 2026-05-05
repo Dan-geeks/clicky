@@ -48,6 +48,7 @@ If you want to do it yourself, here's the deal.
 - Node.js 18+ (for the Cloudflare Worker)
 - A [Cloudflare](https://cloudflare.com) account (free tier works)
 - API keys for: [Anthropic](https://console.anthropic.com), [AssemblyAI](https://www.assemblyai.com), [ElevenLabs](https://elevenlabs.io)
+- Optional Windows testing keys for alternate chat providers: OpenAI, xAI, and Google Gemini
 
 ### 1. Set up the Cloudflare Worker
 
@@ -62,6 +63,9 @@ Now add your secrets. Wrangler will prompt you to paste each one:
 
 ```bash
 npx wrangler secret put ANTHROPIC_API_KEY
+npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put XAI_API_KEY
+npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put ASSEMBLYAI_API_KEY
 npx wrangler secret put ELEVENLABS_API_KEY
 ```
@@ -81,6 +85,8 @@ npx wrangler deploy
 
 It'll give you a URL like `https://your-worker-name.your-subdomain.workers.dev`. Copy that.
 
+For the Windows Buddy setup in this checkout, the deployed Worker name is `clicky-proxy`; keep `worker/wrangler.toml` set to that name so secrets and deploys target the same Worker as `BUDDY_WORKER_BASE_URL`.
+
 ### 2. Run the Worker locally (for development)
 
 If you want to test changes to the Worker without deploying:
@@ -94,12 +100,24 @@ This starts a local server (usually `http://localhost:8787`) that behaves exactl
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=...
+XAI_API_KEY=...
+GEMINI_API_KEY=...
 ASSEMBLYAI_API_KEY=...
 ELEVENLABS_API_KEY=...
 ELEVENLABS_VOICE_ID=...
 ```
 
 Then update the proxy URLs in the Swift code to point to `http://localhost:8787` instead of the deployed Worker URL while developing. Grep for `clicky-proxy` to find them all.
+
+To smoke test the Gemini provider path from Windows CMD after the Worker is running or deployed:
+
+```cmd
+set BUDDY_WORKER_BASE_URL=https://your-worker.workers.dev
+worker\test-gemini-worker.cmd "Say one short sentence if you can read this prompt."
+```
+
+The script sends curl requests to `/chat` for `gemini-3.1-flash-lite-preview` and `gemini-2.5-flash`. If `GEMINI_API_KEY` is missing in the Worker, the expected feedback is `GEMINI_API_KEY is not configured.`
 
 ### 3. Update the proxy URLs in the app
 

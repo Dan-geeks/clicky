@@ -1,8 +1,11 @@
 worker/node_modules/
 worker/.dev.vars
+worker/.wrangler-dry-run/
 .DS_Store
 *.xcuserstate
 build/
 releases/
 .claude/
 coding-plans/
+Buddy.Windows/**/bin/
+Buddy.Windows/**/obj/
