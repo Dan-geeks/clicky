@@ -4,6 +4,8 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using Buddy.Windows.AI;
+using Buddy.Windows.ComputerUse;
+using Buddy.Windows.Configuration;
 using Buddy.Windows.Voice;
 using Forms = System.Windows.Forms;
 
@@ -18,6 +20,7 @@ public sealed class TrayIconManager : IDisposable
     private readonly AssemblyAIStreamingTranscriptionService streamingTranscriptionService;
     private readonly ClaudeResponseService claudeResponseService;
     private readonly ElevenLabsTextToSpeechPlaybackService textToSpeechPlaybackService;
+    private readonly ComputerUseAgentCoordinator computerUseAgentCoordinator;
     private readonly Forms.NotifyIcon trayIcon;
     private FloatingPanelWindow? floatingPanelWindow;
     private bool isDisposed;
@@ -27,13 +30,15 @@ public sealed class TrayIconManager : IDisposable
         MicrophoneCaptureService microphoneCaptureService,
         AssemblyAIStreamingTranscriptionService streamingTranscriptionService,
         ClaudeResponseService claudeResponseService,
-        ElevenLabsTextToSpeechPlaybackService textToSpeechPlaybackService)
+        ElevenLabsTextToSpeechPlaybackService textToSpeechPlaybackService,
+        ComputerUseAgentCoordinator computerUseAgentCoordinator)
     {
         this.pushToTalkHotkeyMonitor = pushToTalkHotkeyMonitor;
         this.microphoneCaptureService = microphoneCaptureService;
         this.streamingTranscriptionService = streamingTranscriptionService;
         this.claudeResponseService = claudeResponseService;
         this.textToSpeechPlaybackService = textToSpeechPlaybackService;
+        this.computerUseAgentCoordinator = computerUseAgentCoordinator;
         trayIcon = new Forms.NotifyIcon
         {
             Text = "Buddy",
@@ -48,6 +53,8 @@ public sealed class TrayIconManager : IDisposable
         streamingTranscriptionService.TranscriptionStateChanged += HandleStreamingTranscriptionStateChanged;
         claudeResponseService.ResponseStateChanged += HandleClaudeResponseStateChanged;
         textToSpeechPlaybackService.PlaybackStateChanged += HandleTextToSpeechPlaybackStateChanged;
+        computerUseAgentCoordinator.StateChanged += HandleComputerUseAgentStateChanged;
+        BuddyRuntimeModelSelection.ModelSelectionChanged += HandleModelSelectionChanged;
     }
 
     public void Initialize()
@@ -71,6 +78,8 @@ public sealed class TrayIconManager : IDisposable
         streamingTranscriptionService.TranscriptionStateChanged -= HandleStreamingTranscriptionStateChanged;
         claudeResponseService.ResponseStateChanged -= HandleClaudeResponseStateChanged;
         textToSpeechPlaybackService.PlaybackStateChanged -= HandleTextToSpeechPlaybackStateChanged;
+        computerUseAgentCoordinator.StateChanged -= HandleComputerUseAgentStateChanged;
+        BuddyRuntimeModelSelection.ModelSelectionChanged -= HandleModelSelectionChanged;
         trayIcon.Dispose();
 
         floatingPanelWindow?.Close();
@@ -84,10 +93,14 @@ public sealed class TrayIconManager : IDisposable
         Forms.ToolStripMenuItem openBuddyMenuItem = new("Open Buddy");
         openBuddyMenuItem.Click += (_, _) => ShowFloatingPanel();
 
+        Forms.ToolStripMenuItem cycleAskModelMenuItem = new("Cycle Ask Model (Ctrl+Alt+M)");
+        cycleAskModelMenuItem.Click += (_, _) => BuddyRuntimeModelSelection.CycleChatModel();
+
         Forms.ToolStripMenuItem quitMenuItem = new("Quit");
         quitMenuItem.Click += (_, _) => System.Windows.Application.Current.Shutdown();
 
         trayContextMenu.Items.Add(openBuddyMenuItem);
+        trayContextMenu.Items.Add(cycleAskModelMenuItem);
         trayContextMenu.Items.Add(new Forms.ToolStripSeparator());
         trayContextMenu.Items.Add(quitMenuItem);
 
@@ -122,7 +135,8 @@ public sealed class TrayIconManager : IDisposable
                 microphoneCaptureService,
                 streamingTranscriptionService,
                 claudeResponseService,
-                textToSpeechPlaybackService);
+                textToSpeechPlaybackService,
+                computerUseAgentCoordinator);
             floatingPanelWindow.Closed += (_, _) => floatingPanelWindow = null;
         }
 
@@ -203,6 +217,32 @@ public sealed class TrayIconManager : IDisposable
         }));
     }
 
+    private void HandleComputerUseAgentStateChanged(
+        object? sender,
+        ComputerUseAgentStateChangedEventArgs eventArguments)
+    {
+        System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            UpdateTrayIconText();
+            floatingPanelWindow?.UpdateComputerUseAgentState(
+                eventArguments.Status,
+                eventArguments.StatusText,
+                eventArguments.FinalAssistantText,
+                eventArguments.ErrorMessage);
+        }));
+    }
+
+    private void HandleModelSelectionChanged(
+        object? sender,
+        BuddyRuntimeModelSelectionChangedEventArgs eventArguments)
+    {
+        System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            UpdateTrayIconText();
+            floatingPanelWindow?.UpdateModelSelectionState();
+        }));
+    }
+
     private void UpdateTrayIconText()
     {
         if (!pushToTalkHotkeyMonitor.IsMonitoring)
@@ -232,6 +272,12 @@ public sealed class TrayIconManager : IDisposable
         if (!string.IsNullOrWhiteSpace(claudeResponseService.ResponseErrorMessage))
         {
             trayIcon.Text = "Buddy - AI unavailable";
+            return;
+        }
+
+        if (computerUseAgentCoordinator.IsAgentRunning)
+        {
+            trayIcon.Text = "Buddy - acting";
             return;
         }
 
@@ -279,7 +325,7 @@ public sealed class TrayIconManager : IDisposable
 
         trayIcon.Text = pushToTalkHotkeyMonitor.IsPushToTalkPressed
             ? "Buddy - Ctrl+Alt held"
-            : "Buddy";
+            : $"Buddy - {BuddyRuntimeModelSelection.CurrentChatDisplayName}";
     }
 
     private static void PositionFloatingPanel(FloatingPanelWindow floatingPanelWindow)

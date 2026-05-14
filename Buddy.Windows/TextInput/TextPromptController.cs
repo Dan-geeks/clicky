@@ -62,6 +62,7 @@ public sealed class TextPromptController : IDisposable
             BuddyLog.Workflow("Typed prompt workflow opening prompt window.");
             StopActiveVoiceInteraction();
             EnsureTextPromptWindow();
+            textPromptWindow?.ApplyMode(TextPromptMode.AskBuddy);
             textPromptWindow?.ShowNearCurrentCursor();
         }));
     }

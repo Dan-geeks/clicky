@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Ask Buddy"
         Width="380"
-        Height="178"
+        Height="202"
         WindowStyle="None"
         ResizeMode="NoResize"
         AllowsTransparency="True"
@@ -30,11 +30,19 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <TextBlock x:Name="PromptHeaderTextBlock"
-                       Text="Ask Buddy"
-                       Foreground="#F5F7FB"
-                       FontSize="14"
-                       FontWeight="SemiBold" />
+            <StackPanel>
+                <TextBlock x:Name="PromptHeaderTextBlock"
+                           Text="Ask Buddy"
+                           Foreground="#F5F7FB"
+                           FontSize="14"
+                           FontWeight="SemiBold" />
+                <TextBlock x:Name="PromptModelTextBlock"
+                           Text="Gemini 3.1 Flash Lite"
+                           Foreground="#7E8AA0"
+                           FontSize="11"
+                           Margin="0,4,0,0"
+                           TextTrimming="CharacterEllipsis" />
+            </StackPanel>
 
             <Border Grid.Row="1"
                     Background="#10141B"

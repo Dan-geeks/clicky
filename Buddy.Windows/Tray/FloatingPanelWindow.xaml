@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Buddy"
         Width="320"
-        Height="620"
+        Height="660"
         WindowStyle="None"
         ResizeMode="NoResize"
         AllowsTransparency="True"
@@ -82,6 +82,18 @@
                                Foreground="#9AA4B5"
                                FontSize="13"
                                Margin="0,4,0,0" />
+                    <TextBlock x:Name="AskModelTextBlock"
+                               Text="Ask: Gemini 3.1 Flash Lite"
+                               Foreground="#D7DCE7"
+                               FontSize="12"
+                               Margin="0,10,0,0"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="ComputerUseModelTextBlock"
+                               Text="Act: Gemini 2.5 Computer Use"
+                               Foreground="#7E8AA0"
+                               FontSize="11"
+                               Margin="0,3,0,0"
+                               TextTrimming="CharacterEllipsis" />
                 </StackPanel>
 
                 <Border x:Name="StatusDot"
@@ -116,7 +128,7 @@
                                    Margin="0,8,0,0"
                                    HorizontalAlignment="Center" />
                         <TextBlock x:Name="ShortcutStateTextBlock"
-                                   Text="Ctrl + Alt + Space to type&#x0a;Ctrl + Alt + Esc to quit"
+                                   Text="Ctrl + Alt + Space to ask&#x0a;Ctrl + Alt + A to act&#x0a;Ctrl + Alt + M to switch model"
                                    Foreground="#5F6B7C"
                                    FontSize="12"
                                    Margin="0,14,0,0"

@@ -46,15 +46,15 @@ public sealed class GeminiComputerUseClient : IDisposable
         }
 
         Uri computerUseEndpointUri = BuddyWindowsConfiguration.CreateWorkerEndpointUri("computer-use");
-        string computerUseModel = BuddyWindowsConfiguration.GetComputerUseModel();
+        string computerUseModel = BuddyRuntimeModelSelection.CurrentComputerUseModel;
 
         BuddyLog.Info(
-            $"Sending Computer Use request to {computerUseEndpointUri}. Model={computerUseModel}; Messages={conversationMessages.Count}.");
+            $"Sending Computer Use request to {computerUseEndpointUri}. Model={computerUseModel}; Display={BuddyRuntimeModelSelection.CurrentComputerUseDisplayName}; Messages={conversationMessages.Count}.");
 
         ComputerUseRequestBody requestBody = new(
             computerUseModel,
             systemInstructionText,
-            "ENVIRONMENT_DESKTOP_OS",
+            "ENVIRONMENT_BROWSER",
             new List<ComputerUseMessage>(conversationMessages));
 
         using HttpRequestMessage requestMessage = new(HttpMethod.Post, computerUseEndpointUri)

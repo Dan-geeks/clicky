@@ -20,8 +20,54 @@ public sealed class ClaudeResponseService : IDisposable
     private static readonly long StreamingNotificationMinIntervalTicks =
         TimeSpan.FromMilliseconds(100).Ticks;
 
+    private static readonly string[] TextHeavyIntentTerms =
+    {
+        "summar",
+        "summary",
+        "explain",
+        "describe",
+        "translate",
+        "translation",
+        "what does this",
+        "what does it",
+        "what is this",
+        "what's this",
+        "what's it",
+        "tell me about",
+        "tell me what",
+        "read this",
+        "read it",
+        "read the",
+        "extract",
+        "transcribe",
+        "rewrite",
+        "rephrase",
+        "shorten",
+        "lengthen",
+        "key points",
+        "main points",
+        "tldr",
+        "tl;dr",
+        "definition",
+        "define",
+        "outline",
+        "answer this",
+        "answer the",
+        "fix this",
+        "improve",
+        "correct",
+        "proofread",
+        "check this",
+        "review",
+        "is this right",
+        "any error",
+        "key idea",
+        "highlights"
+    };
+
     private readonly ClaudeStreamingChatClient claudeStreamingChatClient;
     private readonly WindowsScreenCaptureService windowsScreenCaptureService;
+    private readonly WindowsClipboardTextCaptureService windowsClipboardTextCaptureService;
     private readonly object responseStateLock = new();
     private readonly List<ClaudeConversationExchange> conversationHistory = new();
     private CancellationTokenSource? activeResponseCancellationTokenSource;
@@ -50,10 +96,12 @@ public sealed class ClaudeResponseService : IDisposable
 
     public ClaudeResponseService(
         ClaudeStreamingChatClient claudeStreamingChatClient,
-        WindowsScreenCaptureService windowsScreenCaptureService)
+        WindowsScreenCaptureService windowsScreenCaptureService,
+        WindowsClipboardTextCaptureService windowsClipboardTextCaptureService)
     {
         this.claudeStreamingChatClient = claudeStreamingChatClient;
         this.windowsScreenCaptureService = windowsScreenCaptureService;
+        this.windowsClipboardTextCaptureService = windowsClipboardTextCaptureService;
     }
 
     public event EventHandler<ClaudeResponseStateChangedEventArgs>? ResponseStateChanged;
@@ -218,10 +266,21 @@ public sealed class ClaudeResponseService : IDisposable
                 return;
             }
 
+            string? capturedFocusedWindowText = await CaptureFocusedWindowTextIfHelpfulAsync(
+                completedUserTranscriptText,
+                preferFastModel,
+                responseCancellationTokenSource);
+
+            if (!ShouldContinueResponse(responseCancellationTokenSource))
+            {
+                return;
+            }
+
             string completedRawResponseText = await claudeStreamingChatClient.StreamResponseAsync(
                 completedUserTranscriptText,
                 conversationHistorySnapshot,
                 screenCaptures,
+                capturedFocusedWindowText,
                 updatedRawResponseText => UpdateStreamingResponseText(
                     responseCancellationTokenSource,
                     updatedRawResponseText),
@@ -469,5 +528,57 @@ public sealed class ClaudeResponseService : IDisposable
     private void NotifyResponseStateChanged()
     {
         ResponseStateChanged?.Invoke(this, CreateResponseStateSnapshot());
+    }
+
+    private async Task<string?> CaptureFocusedWindowTextIfHelpfulAsync(
+        string userTranscriptText,
+        bool preferFastModel,
+        CancellationTokenSource responseCancellationTokenSource)
+    {
+        if (preferFastModel)
+        {
+            return null;
+        }
+
+        if (!BuddyWindowsConfiguration.IsTextContextEnabled)
+        {
+            return null;
+        }
+
+        if (!ShouldCaptureFocusedWindowTextForQuery(userTranscriptText))
+        {
+            return null;
+        }
+
+        try
+        {
+            string? capturedFocusedWindowText = await windowsClipboardTextCaptureService
+                .CaptureFocusedWindowTextAsync(responseCancellationTokenSource.Token);
+            return capturedFocusedWindowText;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception captureException)
+        {
+            BuddyLog.Error("Focused-window text capture failed", captureException);
+            return null;
+        }
+    }
+
+    private static bool ShouldCaptureFocusedWindowTextForQuery(string userTranscriptText)
+    {
+        string normalizedQuery = userTranscriptText.ToLowerInvariant();
+
+        foreach (string textHeavyIntentTerm in TextHeavyIntentTerms)
+        {
+            if (normalizedQuery.Contains(textHeavyIntentTerm, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

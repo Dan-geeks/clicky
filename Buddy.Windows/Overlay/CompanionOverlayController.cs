@@ -3,11 +3,15 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using Buddy.Windows.AI;
+using Buddy.Windows.Configuration;
 using Buddy.Windows.Diagnostics;
 using Buddy.Windows.Pointing;
+using Buddy.Windows.Screen;
 using Buddy.Windows.Voice;
 using Forms = System.Windows.Forms;
 
@@ -26,6 +30,7 @@ public sealed class CompanionOverlayController : IDisposable
     private const int ControlVirtualKey = 0x11;
     private const int ShiftVirtualKey = 0x10;
     private const int InsertVirtualKey = 0x2D;
+    private const int TabVirtualKey = 0x09;
     private const int VVirtualKey = 0x56;
     private static readonly TimeSpan IdleDismissDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan CopyPasteOverlayPasteDismissDelay = TimeSpan.FromMilliseconds(350);
@@ -37,7 +42,17 @@ public sealed class CompanionOverlayController : IDisposable
     /// click-near-target gate could. If the user clicks anywhere during this window the
     /// guided task continues to the next step.
     /// </summary>
-    private static readonly TimeSpan PointingInstructionAutoFadeDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan PointingInstructionAutoFadeDelay = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan CompletedTaskDisplayDelay = TimeSpan.FromSeconds(9);
+    private static readonly TimeSpan InactivityHintDelay = TimeSpan.FromSeconds(60);
+    private static readonly string[] InactivityHints =
+    {
+        "Press Ctrl + Alt to ask me anything",
+        "Try: 'show me how to open a new tab'",
+        "Press Ctrl + Alt + A to automate a task on screen",
+        "Press Ctrl + Alt + M to switch the AI model",
+        "Right-click the tray icon and choose Quit to exit",
+    };
     private const int MaximumPointingInstructionTextLength = 120;
     private static readonly string[] CopyPasteIntentTerms =
     {
@@ -59,13 +74,22 @@ public sealed class CompanionOverlayController : IDisposable
     private readonly AssemblyAIStreamingTranscriptionService streamingTranscriptionService;
     private readonly ClaudeResponseService claudeResponseService;
     private readonly ElevenLabsTextToSpeechPlaybackService textToSpeechPlaybackService;
+    private readonly ClaudeStreamingChatClient claudeStreamingChatClient;
+    private readonly WindowsScreenCaptureService windowsScreenCaptureService;
+    private readonly WindowsClipboardTextCaptureService windowsClipboardTextCaptureService;
+    private readonly Random inactivityHintRandom = new();
+    private CancellationTokenSource? inactivitySuggestionCancellationTokenSource;
+    private bool isFetchingInactivitySuggestion;
     private readonly DispatcherTimer idleDismissTimer;
     private readonly DispatcherTimer copyPasteOverlayPasteDismissTimer;
     private readonly DispatcherTimer pointingActionCompletionSettleTimer;
     private readonly DispatcherTimer pointingInstructionAutoFadeTimer;
+    private readonly DispatcherTimer completedTaskDismissTimer;
+    private readonly DispatcherTimer inactivityHintTimer;
     private readonly LowLevelKeyboardProcedure keyboardProcedure;
     private readonly LowLevelMouseProcedure mouseProcedure;
     private CompanionOverlayWindow? overlayWindow;
+    private CopyResponseButtonWindow? copyResponseButtonWindow;
     private IntPtr keyboardHookHandle = IntPtr.Zero;
     private IntPtr mouseHookHandle = IntPtr.Zero;
     private bool isPushToTalkPressed;
@@ -102,6 +126,11 @@ public sealed class CompanionOverlayController : IDisposable
     private bool isPersistentCopyPasteOverlayVisible;
     private bool isCompanionPanelSuppressedForPointing;
     private bool isAdvancingGuidedPointingStep;
+    private string completedTaskResponseText = "";
+    private bool isCompletedTaskResponseVisible;
+    private string currentInactivityHint = "";
+    private bool isInactivityHintVisible;
+    private int nextInactivityHintIndex;
     private bool isDisposed;
 
     public CompanionOverlayController(
@@ -109,13 +138,19 @@ public sealed class CompanionOverlayController : IDisposable
         MicrophoneCaptureService microphoneCaptureService,
         AssemblyAIStreamingTranscriptionService streamingTranscriptionService,
         ClaudeResponseService claudeResponseService,
-        ElevenLabsTextToSpeechPlaybackService textToSpeechPlaybackService)
+        ElevenLabsTextToSpeechPlaybackService textToSpeechPlaybackService,
+        ClaudeStreamingChatClient claudeStreamingChatClient,
+        WindowsScreenCaptureService windowsScreenCaptureService,
+        WindowsClipboardTextCaptureService windowsClipboardTextCaptureService)
     {
         this.pushToTalkHotkeyMonitor = pushToTalkHotkeyMonitor;
         this.microphoneCaptureService = microphoneCaptureService;
         this.streamingTranscriptionService = streamingTranscriptionService;
         this.claudeResponseService = claudeResponseService;
         this.textToSpeechPlaybackService = textToSpeechPlaybackService;
+        this.claudeStreamingChatClient = claudeStreamingChatClient;
+        this.windowsScreenCaptureService = windowsScreenCaptureService;
+        this.windowsClipboardTextCaptureService = windowsClipboardTextCaptureService;
 
         idleDismissTimer = new DispatcherTimer
         {
@@ -140,6 +175,19 @@ public sealed class CompanionOverlayController : IDisposable
             Interval = PointingInstructionAutoFadeDelay
         };
         pointingInstructionAutoFadeTimer.Tick += HandlePointingInstructionAutoFadeTimerTick;
+
+        completedTaskDismissTimer = new DispatcherTimer
+        {
+            Interval = CompletedTaskDisplayDelay
+        };
+        completedTaskDismissTimer.Tick += HandleCompletedTaskDismissTimerTick;
+
+        inactivityHintTimer = new DispatcherTimer
+        {
+            Interval = InactivityHintDelay
+        };
+        inactivityHintTimer.Tick += HandleInactivityHintTimerTick;
+
         keyboardProcedure = HandleKeyboardEvent;
         mouseProcedure = HandleMouseEvent;
     }
@@ -149,6 +197,7 @@ public sealed class CompanionOverlayController : IDisposable
         ObjectDisposedException.ThrowIf(isDisposed, this);
 
         overlayWindow = new CompanionOverlayWindow();
+        copyResponseButtonWindow = new CopyResponseButtonWindow();
         isPushToTalkPressed = pushToTalkHotkeyMonitor.IsPushToTalkPressed;
         isPushToTalkMonitoring = pushToTalkHotkeyMonitor.IsMonitoring;
 
@@ -157,6 +206,7 @@ public sealed class CompanionOverlayController : IDisposable
         streamingTranscriptionService.TranscriptionStateChanged += HandleStreamingTranscriptionStateChanged;
         claudeResponseService.ResponseStateChanged += HandleClaudeResponseStateChanged;
         textToSpeechPlaybackService.PlaybackStateChanged += HandleTextToSpeechPlaybackStateChanged;
+        inactivityHintTimer.Start();
         RenderOverlay();
     }
 
@@ -172,12 +222,16 @@ public sealed class CompanionOverlayController : IDisposable
         copyPasteOverlayPasteDismissTimer.Stop();
         pointingActionCompletionSettleTimer.Stop();
         pointingInstructionAutoFadeTimer.Stop();
+        completedTaskDismissTimer.Stop();
+        inactivityHintTimer.Stop();
         UninstallKeyboardHook();
         UninstallMouseHook();
         idleDismissTimer.Tick -= HandleIdleDismissTimerTick;
         copyPasteOverlayPasteDismissTimer.Tick -= HandleCopyPasteOverlayPasteDismissTimerTick;
         pointingActionCompletionSettleTimer.Tick -= HandlePointingActionCompletionSettleTimerTick;
         pointingInstructionAutoFadeTimer.Tick -= HandlePointingInstructionAutoFadeTimerTick;
+        completedTaskDismissTimer.Tick -= HandleCompletedTaskDismissTimerTick;
+        inactivityHintTimer.Tick -= HandleInactivityHintTimerTick;
         pushToTalkHotkeyMonitor.PushToTalkHotkeyChanged -= HandlePushToTalkHotkeyChanged;
         microphoneCaptureService.CaptureStateChanged -= HandleMicrophoneCaptureStateChanged;
         streamingTranscriptionService.TranscriptionStateChanged -= HandleStreamingTranscriptionStateChanged;
@@ -186,6 +240,8 @@ public sealed class CompanionOverlayController : IDisposable
 
         overlayWindow?.Close();
         overlayWindow = null;
+        copyResponseButtonWindow?.Close();
+        copyResponseButtonWindow = null;
     }
 
     private void HandlePushToTalkHotkeyChanged(object? sender, PushToTalkHotkeyChangedEventArgs eventArguments)
@@ -198,6 +254,7 @@ public sealed class CompanionOverlayController : IDisposable
 
             if (eventArguments.IsPushToTalkPressed)
             {
+                ResetInactivityTimer();
                 latestPointingInstruction = null;
                 pointingInstructionWaitingForUserAction = null;
                 preparedNextPointingInstruction = null;
@@ -208,6 +265,9 @@ public sealed class CompanionOverlayController : IDisposable
                 activeGuidedTaskStepNumber = 0;
                 isCompanionPanelSuppressedForPointing = false;
                 isAdvancingGuidedPointingStep = false;
+                isCompletedTaskResponseVisible = false;
+                completedTaskResponseText = "";
+                completedTaskDismissTimer.Stop();
                 ClearPersistentCopyPasteOverlay();
                 StopWaitingForPointingStepCompletion();
                 overlayWindow?.ClearPointingCursor();
@@ -257,6 +317,14 @@ public sealed class CompanionOverlayController : IDisposable
                 && responsePointingInstruction is null
                 && (eventArguments.IsCapturingScreens || eventArguments.IsResponding);
 
+            if (eventArguments.IsCapturingScreens)
+            {
+                ResetInactivityTimer();
+                isCompletedTaskResponseVisible = false;
+                completedTaskResponseText = "";
+                completedTaskDismissTimer.Stop();
+            }
+
             isCapturingScreens = eventArguments.IsCapturingScreens;
             isClaudeResponding = eventArguments.IsResponding;
             claudeUserTranscriptText = eventArguments.UserTranscriptText;
@@ -299,6 +367,9 @@ public sealed class CompanionOverlayController : IDisposable
                 && !eventArguments.IsResponding
                 && responsePointingInstruction is null)
             {
+                bool wasGuidedTask = activeGuidedTaskStepNumber > 0;
+                string finalResponseText = eventArguments.ResponseText;
+
                 latestPointingInstruction = null;
                 preparedNextPointingInstruction = null;
                 preparedNextInstructionText = "";
@@ -308,14 +379,22 @@ public sealed class CompanionOverlayController : IDisposable
                 activeGuidedTaskStepNumber = 0;
 
                 if (ShouldPersistResponseForCopyPaste(
-                    eventArguments.ResponseText,
+                    finalResponseText,
                     eventArguments.UserTranscriptText))
                 {
-                    ShowPersistentCopyPasteOverlay(eventArguments.ResponseText);
+                    ShowPersistentCopyPasteOverlay(finalResponseText);
                 }
                 else
                 {
                     ClearPersistentCopyPasteOverlay();
+
+                    if (wasGuidedTask && !string.IsNullOrWhiteSpace(finalResponseText))
+                    {
+                        completedTaskResponseText = finalResponseText;
+                        isCompletedTaskResponseVisible = true;
+                        completedTaskDismissTimer.Stop();
+                        completedTaskDismissTimer.Start();
+                    }
                 }
             }
             else if (eventArguments.IsCapturingScreens
@@ -360,6 +439,206 @@ public sealed class CompanionOverlayController : IDisposable
         pointingActionCompletionSettleTimer.Stop();
 
         CompletePointingStepAndVerify(GuidedPointingFollowUpReason.UserActionCompletedAtTarget);
+    }
+
+    private void HandleCompletedTaskDismissTimerTick(object? sender, EventArgs eventArguments)
+    {
+        completedTaskDismissTimer.Stop();
+        isCompletedTaskResponseVisible = false;
+        completedTaskResponseText = "";
+        RenderOverlay();
+    }
+
+    private void HandleInactivityHintTimerTick(object? sender, EventArgs eventArguments)
+    {
+        inactivityHintTimer.Stop();
+
+        // Roughly two out of three firings, try to generate a tip tailored to whatever
+        // the user is looking at right now. The other firings rotate through the static
+        // hints so the cadence still feels responsive when the AI is unreachable or the
+        // focused window has no readable text. If the contextual call is already in
+        // flight from a previous tick we skip starting another one.
+        bool shouldAttemptContextualSuggestion =
+            !isFetchingInactivitySuggestion
+            && BuddyWindowsConfiguration.IsWorkerBaseUrlConfigured
+            && inactivityHintRandom.Next(3) != 0;
+
+        if (shouldAttemptContextualSuggestion)
+        {
+            _ = TryShowContextualInactivitySuggestionAsync();
+            return;
+        }
+
+        ShowStaticInactivityHint();
+    }
+
+    private void ShowStaticInactivityHint()
+    {
+        currentInactivityHint = InactivityHints[nextInactivityHintIndex % InactivityHints.Length];
+        nextInactivityHintIndex++;
+        isInactivityHintVisible = true;
+        RenderOverlay();
+    }
+
+    private async Task TryShowContextualInactivitySuggestionAsync()
+    {
+        CancellationTokenSource suggestionCancellationTokenSource = new();
+        suggestionCancellationTokenSource.CancelAfter(TimeSpan.FromSeconds(20));
+        CancellationTokenSource? previousSuggestionCancellationTokenSource =
+            Interlocked.Exchange(
+                ref inactivitySuggestionCancellationTokenSource,
+                suggestionCancellationTokenSource);
+        previousSuggestionCancellationTokenSource?.Cancel();
+        previousSuggestionCancellationTokenSource?.Dispose();
+        isFetchingInactivitySuggestion = true;
+
+        try
+        {
+            CancellationToken suggestionCancellationToken =
+                suggestionCancellationTokenSource.Token;
+
+            string? capturedFocusedWindowText = null;
+
+            try
+            {
+                capturedFocusedWindowText = await windowsClipboardTextCaptureService
+                    .CaptureFocusedWindowTextAsync(suggestionCancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception focusedWindowTextCaptureException)
+            {
+                BuddyLog.Workflow(
+                    $"Inactivity suggestion skipped focused-window text capture: {focusedWindowTextCaptureException.Message}");
+            }
+
+            IReadOnlyList<WindowsScreenCapture> inactivityScreenCaptures =
+                Array.Empty<WindowsScreenCapture>();
+
+            try
+            {
+                inactivityScreenCaptures = await windowsScreenCaptureService
+                    .CaptureAllScreensAsJpegAsync(
+                        suggestionCancellationToken,
+                        captureCursorScreenOnly: true,
+                        jpegQuality: 55L);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception screenCaptureException)
+            {
+                BuddyLog.Workflow(
+                    $"Inactivity suggestion skipped screen capture: {screenCaptureException.Message}");
+            }
+
+            if (string.IsNullOrWhiteSpace(capturedFocusedWindowText)
+                && inactivityScreenCaptures.Count == 0)
+            {
+                ShowStaticInactivityHintOnUiThread();
+                return;
+            }
+
+            string? suggestionText = await claudeStreamingChatClient
+                .StreamShortContextualSuggestionAsync(
+                    capturedFocusedWindowText,
+                    inactivityScreenCaptures,
+                    suggestionCancellationToken);
+
+            string? normalizedSuggestionText = NormalizeInactivitySuggestion(suggestionText);
+
+            if (string.IsNullOrWhiteSpace(normalizedSuggestionText))
+            {
+                ShowStaticInactivityHintOnUiThread();
+                return;
+            }
+
+            BuddyLog.Workflow(
+                $"Inactivity suggestion: {BuddyLog.DescribeTextForLog(normalizedSuggestionText)}");
+
+            _ = System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                currentInactivityHint = normalizedSuggestionText;
+                isInactivityHintVisible = true;
+                RenderOverlay();
+            }));
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelled because the user became active again or another tick replaced us.
+        }
+        catch (Exception suggestionException)
+        {
+            BuddyLog.Error("Inactivity contextual suggestion failed", suggestionException);
+            ShowStaticInactivityHintOnUiThread();
+        }
+        finally
+        {
+            isFetchingInactivitySuggestion = false;
+
+            if (ReferenceEquals(
+                Interlocked.CompareExchange(
+                    ref inactivitySuggestionCancellationTokenSource,
+                    null,
+                    suggestionCancellationTokenSource),
+                suggestionCancellationTokenSource))
+            {
+                suggestionCancellationTokenSource.Dispose();
+            }
+        }
+    }
+
+    private void ShowStaticInactivityHintOnUiThread()
+    {
+        System.Windows.Application.Current.Dispatcher.BeginInvoke(
+            new Action(ShowStaticInactivityHint));
+    }
+
+    private static string? NormalizeInactivitySuggestion(string? rawSuggestion)
+    {
+        if (string.IsNullOrWhiteSpace(rawSuggestion))
+        {
+            return null;
+        }
+
+        string trimmedSuggestion = rawSuggestion.Trim().Trim('"', '\'', '`');
+        int firstNewlineIndex = trimmedSuggestion.IndexOf('\n');
+
+        if (firstNewlineIndex >= 0)
+        {
+            trimmedSuggestion = trimmedSuggestion[..firstNewlineIndex].Trim();
+        }
+
+        if (trimmedSuggestion.Equals("skip", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (trimmedSuggestion.Length > 120)
+        {
+            int sentenceBreakIndex = trimmedSuggestion.IndexOfAny(new[] { '.', '!', '?' });
+            trimmedSuggestion = sentenceBreakIndex > 0
+                ? trimmedSuggestion[..(sentenceBreakIndex + 1)].Trim()
+                : trimmedSuggestion[..120].Trim() + "...";
+        }
+
+        return string.IsNullOrWhiteSpace(trimmedSuggestion) ? null : trimmedSuggestion;
+    }
+
+    private void ResetInactivityTimer()
+    {
+        isInactivityHintVisible = false;
+        currentInactivityHint = "";
+        inactivityHintTimer.Stop();
+        inactivityHintTimer.Start();
+
+        CancellationTokenSource? inflightSuggestionCancellationTokenSource =
+            Interlocked.Exchange(ref inactivitySuggestionCancellationTokenSource, null);
+        inflightSuggestionCancellationTokenSource?.Cancel();
+        inflightSuggestionCancellationTokenSource?.Dispose();
     }
 
     private void HandlePointingInstructionAutoFadeTimerTick(object? sender, EventArgs eventArguments)
@@ -455,6 +734,7 @@ public sealed class CompanionOverlayController : IDisposable
         }
 
         CompanionOverlayPresentationState? presentationState = CreateActivePresentationState();
+        UpdateCopyResponseButtonForPresentationState(presentationState);
 
         if (latestPointingInstruction is not null)
         {
@@ -466,7 +746,21 @@ public sealed class CompanionOverlayController : IDisposable
         if (isAdvancingGuidedPointingStep)
         {
             idleDismissTimer.Stop();
-            overlayWindow.PresentFollowerCursor();
+            string carriedOverInstructionText = !string.IsNullOrWhiteSpace(latestGuidedVisibleInstructionText)
+                ? latestGuidedVisibleInstructionText
+                : claudeResponseText;
+            bool hasCarriedOverInstructionText =
+                !string.IsNullOrWhiteSpace(carriedOverInstructionText);
+            overlayWindow.Present(new CompanionOverlayPresentationState(
+                "",
+                "",
+                claudeUserTranscriptText,
+                carriedOverInstructionText,
+                0,
+                false,
+                !string.IsNullOrWhiteSpace(claudeUserTranscriptText),
+                hasCarriedOverInstructionText,
+                shouldShowThinkingAnimation: true));
             return;
         }
 
@@ -481,6 +775,25 @@ public sealed class CompanionOverlayController : IDisposable
         idleDismissTimer.Stop();
         overlayWindow.Present(presentationState);
         RenderPointingInstruction();
+    }
+
+    private void UpdateCopyResponseButtonForPresentationState(
+        CompanionOverlayPresentationState? presentationState)
+    {
+        if (copyResponseButtonWindow is null)
+        {
+            return;
+        }
+
+        if (presentationState is null
+            || !presentationState.ShouldShowResponse
+            || string.IsNullOrWhiteSpace(presentationState.ResponseText))
+        {
+            copyResponseButtonWindow.HideButton();
+            return;
+        }
+
+        copyResponseButtonWindow.ShowForResponse(presentationState.ResponseText);
     }
 
     private void RenderPointingInstruction()
@@ -631,6 +944,32 @@ public sealed class CompanionOverlayController : IDisposable
                 false,
                 true,
                 shouldUseCopyPasteLayout: true);
+        }
+
+        if (isCompletedTaskResponseVisible && !string.IsNullOrWhiteSpace(completedTaskResponseText))
+        {
+            return new CompanionOverlayPresentationState(
+                "Done",
+                "Press Ctrl + Alt if you need help with the next step",
+                "",
+                completedTaskResponseText,
+                0,
+                false,
+                false,
+                true);
+        }
+
+        if (isInactivityHintVisible && !string.IsNullOrWhiteSpace(currentInactivityHint))
+        {
+            return new CompanionOverlayPresentationState(
+                "Tip",
+                currentInactivityHint,
+                "",
+                "",
+                0,
+                false,
+                false,
+                false);
         }
 
         return null;
@@ -813,6 +1152,7 @@ public sealed class CompanionOverlayController : IDisposable
     {
         pointingInstructionWaitingForUserAction = pointingInstruction;
         InstallMouseHook();
+        InstallKeyboardHook();
         // Auto-fade if the user never clicks. Mirrors the macOS overlay's bubble timeout
         // so a stale or imprecise pointing target does not freeze the workflow.
         pointingInstructionAutoFadeTimer.Stop();
@@ -827,6 +1167,7 @@ public sealed class CompanionOverlayController : IDisposable
         if (!isPersistentCopyPasteOverlayVisible)
         {
             UninstallMouseHook();
+            UninstallKeyboardHook();
         }
     }
 
@@ -1019,22 +1360,34 @@ public sealed class CompanionOverlayController : IDisposable
 
     private IntPtr HandleKeyboardEvent(int keyboardEventCode, IntPtr messageIdentifier, IntPtr keyboardEventData)
     {
-        if (keyboardEventCode >= 0 && isPersistentCopyPasteOverlayVisible)
+        if (keyboardEventCode >= 0)
         {
             int keyboardMessageIdentifier = messageIdentifier.ToInt32();
 
-            if (IsEscapeKeyDown(keyboardMessageIdentifier, keyboardEventData))
+            if (isPersistentCopyPasteOverlayVisible)
             {
-                BuddyLog.Workflow("Persistent copy/paste overlay dismissed with Escape.");
-                System.Windows.Application.Current.Dispatcher.BeginInvoke(
-                    new Action(DismissPersistentCopyPasteOverlay));
-                return new IntPtr(1);
+                if (IsEscapeKeyDown(keyboardMessageIdentifier, keyboardEventData))
+                {
+                    BuddyLog.Workflow("Persistent copy/paste overlay dismissed with Escape.");
+                    System.Windows.Application.Current.Dispatcher.BeginInvoke(
+                        new Action(DismissPersistentCopyPasteOverlay));
+                    return new IntPtr(1);
+                }
+
+                if (IsPasteShortcut(keyboardMessageIdentifier, keyboardEventData))
+                {
+                    System.Windows.Application.Current.Dispatcher.BeginInvoke(
+                        new Action(StartCopyPasteOverlayDismissAfterPaste));
+                }
             }
 
-            if (IsPasteShortcut(keyboardMessageIdentifier, keyboardEventData))
+            if (pointingInstructionWaitingForUserAction is not null
+                && IsTabKeyDown(keyboardMessageIdentifier, keyboardEventData))
             {
+                BuddyLog.Workflow("Tab pressed while pointing — requesting step-by-step help.");
                 System.Windows.Application.Current.Dispatcher.BeginInvoke(
-                    new Action(StartCopyPasteOverlayDismissAfterPaste));
+                    new Action(RequestStepByStepHelpForActivePointingStep));
+                return new IntPtr(1);
             }
         }
 
@@ -1044,7 +1397,12 @@ public sealed class CompanionOverlayController : IDisposable
     /// <summary>
     /// Called when the user clicks anywhere while a pointing instruction is on screen.
     /// Stops the auto-fade hold, releases the mouse hook, and starts the short settle
-    /// timer so Buddy can verify the new screen state and advance the guided task.
+    /// timer so Buddy can verify the new screen state and advance the guided task. If
+    /// the response asks the user to type or paste content, the click is treated as
+    /// "user is placing their cursor to start typing" rather than "step done" — we keep
+    /// the instruction visible so the user can read what to type, and switch to the
+    /// persistent copy/paste overlay so the response stays anchored until they press
+    /// Esc or trigger the next request with Ctrl+Alt.
     /// </summary>
     private void AdvanceFromPointingStepAfterUserClick()
     {
@@ -1053,11 +1411,64 @@ public sealed class CompanionOverlayController : IDisposable
             return;
         }
 
+        string currentResponseTextSnapshot = string.IsNullOrWhiteSpace(claudeResponseText)
+            ? latestGuidedVisibleInstructionText
+            : claudeResponseText;
+
+        if (ShouldKeepResponseVisibleForUserTyping(
+            currentResponseTextSnapshot,
+            claudeUserTranscriptText))
+        {
+            BuddyLog.Workflow(
+                "Pointing click did not advance: response asks the user to type or paste, keeping it visible.");
+            pointingInstructionAutoFadeTimer.Stop();
+            UninstallMouseHook();
+            pointingInstructionWaitingForUserAction = null;
+            latestPointingInstruction = null;
+            preparedNextPointingInstruction = null;
+            preparedNextInstructionText = "";
+            isCompanionPanelSuppressedForPointing = false;
+            isAdvancingGuidedPointingStep = false;
+            // Animate the cursor back to the user's real mouse, then switch to the
+            // persistent copy/paste overlay so the response (and any code it contains)
+            // stays on screen until the user paste it or dismisses with Escape.
+            overlayWindow?.ClearPointingCursor(animateReturnToCursor: true, onCompleted: () =>
+            {
+                ShowPersistentCopyPasteOverlay(currentResponseTextSnapshot);
+                RenderOverlay();
+            });
+            return;
+        }
+
         pointingInstructionAutoFadeTimer.Stop();
         UninstallMouseHook();
         overlayWindow?.UpdatePointingInstructionText("checking the next step...");
         pointingActionCompletionSettleTimer.Stop();
         pointingActionCompletionSettleTimer.Start();
+    }
+
+    private static bool ShouldKeepResponseVisibleForUserTyping(
+        string responseText,
+        string userTranscriptText)
+    {
+        if (string.IsNullOrWhiteSpace(responseText))
+        {
+            return false;
+        }
+
+        if (ShouldPersistResponseForCopyPaste(responseText, userTranscriptText))
+        {
+            return true;
+        }
+
+        string normalizedResponseText = responseText.ToLowerInvariant();
+        return normalizedResponseText.Contains("type ", StringComparison.Ordinal)
+            || normalizedResponseText.Contains("then type", StringComparison.Ordinal)
+            || normalizedResponseText.Contains("enter the ", StringComparison.Ordinal)
+            || normalizedResponseText.Contains("enter:", StringComparison.Ordinal)
+            || normalizedResponseText.Contains("write the ", StringComparison.Ordinal)
+            || normalizedResponseText.Contains("write:", StringComparison.Ordinal)
+            || normalizedResponseText.Contains("paste ", StringComparison.Ordinal);
     }
 
     private void InstallMouseHook()
@@ -1221,6 +1632,58 @@ public sealed class CompanionOverlayController : IDisposable
         }
 
         return Marshal.ReadInt32(keyboardEventData) == EscapeVirtualKey;
+    }
+
+    private static bool IsTabKeyDown(int messageIdentifier, IntPtr keyboardEventData)
+    {
+        if (messageIdentifier is not KeyDownMessageIdentifier and not SystemKeyDownMessageIdentifier)
+        {
+            return false;
+        }
+
+        if (Marshal.ReadInt32(keyboardEventData) != TabVirtualKey)
+        {
+            return false;
+        }
+
+        // Don't intercept Ctrl+Tab or Alt+Tab — those are used for window/tab switching and
+        // belong to the user's app, not Buddy. Plain Tab while a Buddy bubble is on screen
+        // is the dedicated step-by-step trigger.
+        return !IsVirtualKeyPressed(ControlVirtualKey)
+            && !IsVirtualKeyPressed(0x12); // Alt
+    }
+
+    private void RequestStepByStepHelpForActivePointingStep()
+    {
+        PointingInstruction? activePointingInstruction = pointingInstructionWaitingForUserAction
+            ?? latestPointingInstruction;
+
+        if (activePointingInstruction is null)
+        {
+            return;
+        }
+
+        string targetLabel = string.IsNullOrWhiteSpace(activePointingInstruction.Label)
+            ? "the highlighted target"
+            : activePointingInstruction.Label;
+        string visibleInstructionContext = string.IsNullOrWhiteSpace(latestGuidedVisibleInstructionText)
+            ? claudeResponseText
+            : latestGuidedVisibleInstructionText;
+        string normalizedVisibleInstructionContext = string.IsNullOrWhiteSpace(visibleInstructionContext)
+            ? "no previous visible instruction was captured"
+            : visibleInstructionContext;
+        string stepByStepFollowUpPromptText = string.Format(
+            CultureInfo.InvariantCulture,
+            "the user pressed tab on the previous step because they want a more detailed step-by-step explanation. previous instruction shown: \"{0}\". current target: \"{1}\". reply with three to six numbered micro-steps in plain language explaining exactly how to perform this single action (where to look on screen, what to click, what happens after), then append one fresh [POINT:x,y:label:screenN] tag for the immediate action so buddy keeps pointing.",
+            normalizedVisibleInstructionContext,
+            targetLabel);
+
+        // Cancel auto-fade so the help arrives before the bubble disappears, and keep the
+        // bubble label informative while we wait.
+        pointingInstructionAutoFadeTimer.Stop();
+        overlayWindow?.UpdatePointingInstructionText("getting a step-by-step for you...");
+        textToSpeechPlaybackService.StopPlayback();
+        claudeResponseService.SendUserTranscript(stepByStepFollowUpPromptText, preferFastModel: false);
     }
 
     private static bool IsVirtualKeyPressed(int virtualKeyCode)

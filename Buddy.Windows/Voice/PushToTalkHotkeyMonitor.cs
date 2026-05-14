@@ -22,6 +22,7 @@ public sealed class PushToTalkHotkeyMonitor : IDisposable
     private const int RightAltVirtualKeyCode = 0xA5;
     private const int SpaceVirtualKeyCode = 0x20;
     private const int EscapeVirtualKeyCode = 0x1B;
+    private const int ModelCycleVirtualKeyCode = 0x4D; // M: Ctrl+Alt+M cycles the Ask Buddy model.
     private const int ActionModeVirtualKeyCode = 0x41; // 'A' — Ctrl+Alt+A launches Computer Use action mode.
 
     private readonly LowLevelKeyboardProcedure keyboardProcedure;
@@ -34,6 +35,8 @@ public sealed class PushToTalkHotkeyMonitor : IDisposable
     private bool isShutdownHotkeyPressed;
     private bool isActionModeKeyPressed;
     private bool isActionModeHotkeyPressed;
+    private bool isModelCycleKeyPressed;
+    private bool isModelCycleHotkeyPressed;
     private bool isDisposed;
 
     public PushToTalkHotkeyMonitor(bool isVoiceShortcutEnabled)
@@ -47,6 +50,8 @@ public sealed class PushToTalkHotkeyMonitor : IDisposable
     public event EventHandler? TextPromptHotkeyPressed;
 
     public event EventHandler? ShutdownHotkeyPressed;
+
+    public event EventHandler? ChatModelCycleHotkeyPressed;
 
     /// <summary>
     /// Fires once when Ctrl+Alt+A transitions from up→down. Routed to the Computer Use
@@ -128,6 +133,8 @@ public sealed class PushToTalkHotkeyMonitor : IDisposable
         isShutdownHotkeyPressed = false;
         isActionModeKeyPressed = false;
         isActionModeHotkeyPressed = false;
+        isModelCycleKeyPressed = false;
+        isModelCycleHotkeyPressed = false;
         IsMonitoring = false;
         IsPushToTalkPressed = false;
     }
@@ -162,6 +169,11 @@ public sealed class PushToTalkHotkeyMonitor : IDisposable
                     bool isActionModeKeyPressed = IsKeyDownMessage(messageIdentifierValue);
                     UpdateActionModeKeyState(isActionModeKeyPressed);
                 }
+                else if (virtualKeyCode == ModelCycleVirtualKeyCode)
+                {
+                    bool isModelCycleKeyPressed = IsKeyDownMessage(messageIdentifierValue);
+                    UpdateModelCycleKeyState(isModelCycleKeyPressed);
+                }
             }
         }
 
@@ -182,15 +194,18 @@ public sealed class PushToTalkHotkeyMonitor : IDisposable
         isSpaceKeyPressed = IsVirtualKeyCurrentlyPressed(SpaceVirtualKeyCode);
         isEscapeKeyPressed = IsVirtualKeyCurrentlyPressed(EscapeVirtualKeyCode);
         isActionModeKeyPressed = IsVirtualKeyCurrentlyPressed(ActionModeVirtualKeyCode);
+        isModelCycleKeyPressed = IsVirtualKeyCurrentlyPressed(ModelCycleVirtualKeyCode);
         isTextPromptHotkeyPressed = isSpaceKeyPressed && IsAnyControlKeyPressed() && IsAnyAltKeyPressed();
         isShutdownHotkeyPressed = isEscapeKeyPressed && IsAnyControlKeyPressed() && IsAnyAltKeyPressed();
         isActionModeHotkeyPressed = isActionModeKeyPressed && IsAnyControlKeyPressed() && IsAnyAltKeyPressed();
+        isModelCycleHotkeyPressed = isModelCycleKeyPressed && IsAnyControlKeyPressed() && IsAnyAltKeyPressed();
         IsPushToTalkPressed = isVoiceShortcutEnabled
             && IsAnyControlKeyPressed()
             && IsAnyAltKeyPressed()
             && !isTextPromptHotkeyPressed
             && !isShutdownHotkeyPressed
-            && !isActionModeHotkeyPressed;
+            && !isActionModeHotkeyPressed
+            && !isModelCycleHotkeyPressed;
     }
 
     private void AddModifierIfCurrentlyPressed(int virtualKeyCode)
@@ -248,6 +263,17 @@ public sealed class PushToTalkHotkeyMonitor : IDisposable
         RefreshShortcutStates();
     }
 
+    private void UpdateModelCycleKeyState(bool isModelCycleKeyPressed)
+    {
+        if (this.isModelCycleKeyPressed == isModelCycleKeyPressed)
+        {
+            return;
+        }
+
+        this.isModelCycleKeyPressed = isModelCycleKeyPressed;
+        RefreshShortcutStates();
+    }
+
     private void RefreshShortcutStates()
     {
         bool updatedTextPromptHotkeyPressedState = isSpaceKeyPressed
@@ -274,12 +300,21 @@ public sealed class PushToTalkHotkeyMonitor : IDisposable
 
         isActionModeHotkeyPressed = updatedActionModeHotkeyPressedState;
 
+        bool updatedModelCycleHotkeyPressedState = isModelCycleKeyPressed
+            && IsAnyControlKeyPressed()
+            && IsAnyAltKeyPressed();
+        bool shouldNotifyModelCycleHotkeyPressed = updatedModelCycleHotkeyPressedState
+            && !isModelCycleHotkeyPressed;
+
+        isModelCycleHotkeyPressed = updatedModelCycleHotkeyPressedState;
+
         bool updatedPushToTalkPressedState = isVoiceShortcutEnabled
             && IsAnyControlKeyPressed()
             && IsAnyAltKeyPressed()
             && !isTextPromptHotkeyPressed
             && !isShutdownHotkeyPressed
-            && !isActionModeHotkeyPressed;
+            && !isActionModeHotkeyPressed
+            && !isModelCycleHotkeyPressed;
 
         if (updatedPushToTalkPressedState != IsPushToTalkPressed)
         {
@@ -306,6 +341,12 @@ public sealed class PushToTalkHotkeyMonitor : IDisposable
         {
             BuddyLog.Workflow("Action mode shortcut pressed (Ctrl+Alt+A).");
             ActionModeHotkeyPressed?.Invoke(this, EventArgs.Empty);
+        }
+
+        if (shouldNotifyModelCycleHotkeyPressed)
+        {
+            BuddyLog.Workflow("Ask model cycle shortcut pressed (Ctrl+Alt+M).");
+            ChatModelCycleHotkeyPressed?.Invoke(this, EventArgs.Empty);
         }
     }
 

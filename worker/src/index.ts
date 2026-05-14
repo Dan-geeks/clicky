@@ -725,7 +725,7 @@ async function handleComputerUse(
 
   const computerUseRequest = (await request.json()) as ComputerUseRequest;
   console.log(
-    `[${requestId}] /computer-use received: Model=${computerUseRequest.model}; Messages=${computerUseRequest.messages.length}; Environment=${computerUseRequest.environment ?? "ENVIRONMENT_DESKTOP_OS"}`
+    `[${requestId}] /computer-use received: Model=${computerUseRequest.model}; Messages=${computerUseRequest.messages.length}; Environment=${computerUseRequest.environment ?? "ENVIRONMENT_BROWSER"}`
   );
 
   const upstreamUrl =
@@ -761,7 +761,7 @@ async function handleComputerUse(
 
 function createGeminiComputerUseRequest(computerUseRequest: ComputerUseRequest): unknown {
   const computerUseToolConfig: Record<string, unknown> = {
-    environment: computerUseRequest.environment ?? "ENVIRONMENT_DESKTOP_OS",
+    environment: computerUseRequest.environment ?? "ENVIRONMENT_BROWSER",
   };
 
   if (computerUseRequest.exclude_predefined_functions && computerUseRequest.exclude_predefined_functions.length > 0) {

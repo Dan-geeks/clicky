@@ -11,6 +11,7 @@ public static class BuddyWindowsConfiguration
     public const string FastChatModelEnvironmentVariableName = "BUDDY_FAST_AI_MODEL";
     public const string EnableVoiceEnvironmentVariableName = "BUDDY_ENABLE_VOICE";
     public const string EnableScrollContextEnvironmentVariableName = "BUDDY_ENABLE_SCROLL_CONTEXT";
+    public const string EnableTextContextEnvironmentVariableName = "BUDDY_ENABLE_TEXT_CONTEXT";
     public const string ComputerUseModelEnvironmentVariableName = "BUDDY_COMPUTER_USE_MODEL";
     public const string ComputerUseMaxTurnsEnvironmentVariableName = "BUDDY_COMPUTER_USE_MAX_TURNS";
 
@@ -53,6 +54,19 @@ public static class BuddyWindowsConfiguration
                 configuredScrollContextEnabled?.Trim().ToLowerInvariant() ?? "";
 
             return normalizedScrollContextEnabled is not ("0" or "false" or "no" or "off");
+        }
+    }
+
+    public static bool IsTextContextEnabled
+    {
+        get
+        {
+            string? configuredTextContextEnabled =
+                GetConfiguredEnvironmentVariable(EnableTextContextEnvironmentVariableName);
+            string normalizedTextContextEnabled =
+                configuredTextContextEnabled?.Trim().ToLowerInvariant() ?? "";
+
+            return normalizedTextContextEnabled is not ("0" or "false" or "no" or "off");
         }
     }
 

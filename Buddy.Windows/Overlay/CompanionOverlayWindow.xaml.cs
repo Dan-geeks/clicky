@@ -314,10 +314,14 @@ public partial class CompanionOverlayWindow : Window
         AudioLevelTrack.Visibility = !isThinking && presentationState.ShouldShowAudioLevel
             ? Visibility.Visible
             : Visibility.Collapsed;
-        TranscriptTextBlock.Visibility = !isThinking && presentationState.ShouldShowTranscript
+        // Keep transcript and response visible during the thinking animation so the user
+        // can continue reading the previous instruction (e.g. code to type) while Buddy
+        // verifies the screen for the next step. Only the audio level meter and the small
+        // detail line are tied to the thinking animation visually.
+        TranscriptTextBlock.Visibility = presentationState.ShouldShowTranscript
             ? Visibility.Visible
             : Visibility.Collapsed;
-        ResponseTextBlock.Visibility = !isThinking && presentationState.ShouldShowResponse
+        ResponseTextBlock.Visibility = presentationState.ShouldShowResponse
             ? Visibility.Visible
             : Visibility.Collapsed;
         if (isThinking)

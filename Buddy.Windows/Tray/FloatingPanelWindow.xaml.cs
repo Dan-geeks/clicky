@@ -5,6 +5,8 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using Buddy.Windows.AI;
+using Buddy.Windows.ComputerUse;
+using Buddy.Windows.Configuration;
 using Buddy.Windows.Voice;
 
 namespace Buddy.Windows.Tray;
@@ -25,6 +27,7 @@ public partial class FloatingPanelWindow : Window
     private readonly AssemblyAIStreamingTranscriptionService streamingTranscriptionService;
     private readonly ClaudeResponseService claudeResponseService;
     private readonly ElevenLabsTextToSpeechPlaybackService textToSpeechPlaybackService;
+    private readonly ComputerUseAgentCoordinator computerUseAgentCoordinator;
     private bool isPushToTalkPressed;
     private bool isPushToTalkMonitoring;
     private string? pushToTalkMonitoringErrorMessage;
@@ -49,20 +52,27 @@ public partial class FloatingPanelWindow : Window
     private bool isTextToSpeechPlayingAudio;
     private string textToSpeechSpokenText = "";
     private string? textToSpeechPlaybackErrorMessage;
+    private ComputerUseAgentStatus computerUseAgentStatus = ComputerUseAgentStatus.Completed;
+    private string computerUseStatusText = "";
+    private string computerUseFinalAssistantText = "";
+    private string? computerUseErrorMessage;
 
     public FloatingPanelWindow(
         PushToTalkHotkeyMonitor pushToTalkHotkeyMonitor,
         MicrophoneCaptureService microphoneCaptureService,
         AssemblyAIStreamingTranscriptionService streamingTranscriptionService,
         ClaudeResponseService claudeResponseService,
-        ElevenLabsTextToSpeechPlaybackService textToSpeechPlaybackService)
+        ElevenLabsTextToSpeechPlaybackService textToSpeechPlaybackService,
+        ComputerUseAgentCoordinator computerUseAgentCoordinator)
     {
         this.pushToTalkHotkeyMonitor = pushToTalkHotkeyMonitor;
         this.microphoneCaptureService = microphoneCaptureService;
         this.streamingTranscriptionService = streamingTranscriptionService;
         this.claudeResponseService = claudeResponseService;
         this.textToSpeechPlaybackService = textToSpeechPlaybackService;
+        this.computerUseAgentCoordinator = computerUseAgentCoordinator;
         InitializeComponent();
+        UpdateModelSelectionState();
 
         UpdatePushToTalkState(
             pushToTalkHotkeyMonitor.IsPushToTalkPressed,
@@ -74,6 +84,8 @@ public partial class FloatingPanelWindow : Window
         streamingTranscriptionService.TranscriptionStateChanged += HandleStreamingTranscriptionStateChanged;
         claudeResponseService.ResponseStateChanged += HandleClaudeResponseStateChanged;
         textToSpeechPlaybackService.PlaybackStateChanged += HandleTextToSpeechPlaybackStateChanged;
+        computerUseAgentCoordinator.StateChanged += HandleComputerUseAgentStateChanged;
+        BuddyRuntimeModelSelection.ModelSelectionChanged += HandleModelSelectionChanged;
     }
 
     protected override void OnSourceInitialized(EventArgs eventArguments)
@@ -97,7 +109,24 @@ public partial class FloatingPanelWindow : Window
         streamingTranscriptionService.TranscriptionStateChanged -= HandleStreamingTranscriptionStateChanged;
         claudeResponseService.ResponseStateChanged -= HandleClaudeResponseStateChanged;
         textToSpeechPlaybackService.PlaybackStateChanged -= HandleTextToSpeechPlaybackStateChanged;
+        computerUseAgentCoordinator.StateChanged -= HandleComputerUseAgentStateChanged;
+        BuddyRuntimeModelSelection.ModelSelectionChanged -= HandleModelSelectionChanged;
         base.OnClosed(eventArguments);
+    }
+
+    public void UpdateModelSelectionState()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(new Action(UpdateModelSelectionState));
+            return;
+        }
+
+        BuddyRuntimeModelSelectionChangedEventArgs modelSelectionSnapshot =
+            BuddyRuntimeModelSelection.CreateSnapshot();
+        AskModelTextBlock.Text =
+            $"Ask ({modelSelectionSnapshot.ChatModelNumber}/{modelSelectionSnapshot.ChatModelCount}): {modelSelectionSnapshot.ChatModel.DisplayName}";
+        ComputerUseModelTextBlock.Text = $"Act: {modelSelectionSnapshot.ComputerUseDisplayName}";
     }
 
     public void UpdatePushToTalkState(
@@ -143,6 +172,28 @@ public partial class FloatingPanelWindow : Window
         isTextToSpeechPlayingAudio = isPlayingAudio;
         textToSpeechSpokenText = spokenText;
         textToSpeechPlaybackErrorMessage = playbackErrorMessage;
+        RenderCurrentVoiceState();
+    }
+
+    public void UpdateComputerUseAgentState(
+        ComputerUseAgentStatus status,
+        string statusText,
+        string? finalAssistantText,
+        string? errorMessage)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                UpdateComputerUseAgentState(status, statusText, finalAssistantText, errorMessage);
+            }));
+            return;
+        }
+
+        computerUseAgentStatus = status;
+        computerUseStatusText = statusText;
+        computerUseFinalAssistantText = finalAssistantText ?? "";
+        computerUseErrorMessage = errorMessage;
         RenderCurrentVoiceState();
     }
 
@@ -297,6 +348,24 @@ public partial class FloatingPanelWindow : Window
             eventArguments.PlaybackErrorMessage);
     }
 
+    private void HandleComputerUseAgentStateChanged(
+        object? sender,
+        ComputerUseAgentStateChangedEventArgs eventArguments)
+    {
+        UpdateComputerUseAgentState(
+            eventArguments.Status,
+            eventArguments.StatusText,
+            eventArguments.FinalAssistantText,
+            eventArguments.ErrorMessage);
+    }
+
+    private void HandleModelSelectionChanged(
+        object? sender,
+        BuddyRuntimeModelSelectionChangedEventArgs eventArguments)
+    {
+        UpdateModelSelectionState();
+    }
+
     private void RenderCurrentVoiceState()
     {
         RenderConversationText();
@@ -341,6 +410,17 @@ public partial class FloatingPanelWindow : Window
             ShortcutStateTextBlock.Text = textToSpeechPlaybackErrorMessage;
             CaptureDetailTextBlock.Text = "Check Worker and ElevenLabs setup";
             StatusDot.Background = ErrorStatusBrush;
+            UpdateAudioLevelFill(0);
+            return;
+        }
+
+        if (computerUseAgentCoordinator.IsAgentRunning)
+        {
+            AppStatusTextBlock.Text = "Acting";
+            VoiceStateTextBlock.Text = "Computer Use";
+            ShortcutStateTextBlock.Text = computerUseStatusText;
+            CaptureDetailTextBlock.Text = BuddyRuntimeModelSelection.CurrentComputerUseDisplayName;
+            StatusDot.Background = ActiveStatusBrush;
             UpdateAudioLevelFill(0);
             return;
         }
@@ -437,7 +517,7 @@ public partial class FloatingPanelWindow : Window
 
         AppStatusTextBlock.Text = "Ready";
         VoiceStateTextBlock.Text = "Text prompt";
-        ShortcutStateTextBlock.Text = "Ctrl + Alt + Space to type\nCtrl + Alt + Esc to quit";
+        ShortcutStateTextBlock.Text = "Ctrl + Alt + Space to ask\nCtrl + Alt + A to act\nCtrl + Alt + M to switch model";
         CaptureDetailTextBlock.Text = "Voice is off for now";
         StatusDot.Background = ReadyStatusBrush;
         UpdateAudioLevelFill(0);
@@ -483,6 +563,23 @@ public partial class FloatingPanelWindow : Window
         if (!string.IsNullOrWhiteSpace(claudeResponseText))
         {
             return claudeResponseText;
+        }
+
+        if (!string.IsNullOrWhiteSpace(computerUseErrorMessage))
+        {
+            return computerUseErrorMessage;
+        }
+
+        if (!string.IsNullOrWhiteSpace(computerUseFinalAssistantText))
+        {
+            return computerUseFinalAssistantText;
+        }
+
+        if (computerUseAgentCoordinator.IsAgentRunning)
+        {
+            return string.IsNullOrWhiteSpace(computerUseStatusText)
+                ? "Computer Use is running..."
+                : computerUseStatusText;
         }
 
         if (!string.IsNullOrWhiteSpace(textToSpeechSpokenText))

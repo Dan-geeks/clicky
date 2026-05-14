@@ -34,6 +34,7 @@ public partial class App : System.Windows.Application
     private TextPromptController? textPromptController;
     private TrayIconManager? trayIconManager;
     private WindowsScreenCaptureService? windowsScreenCaptureService;
+    private WindowsClipboardTextCaptureService? windowsClipboardTextCaptureService;
 
     protected override void OnStartup(StartupEventArgs startupEventArguments)
     {
@@ -51,23 +52,34 @@ public partial class App : System.Windows.Application
         BuddyLog.Info($"Buddy.Windows starting. Log file: {BuddyLog.LogFilePath}");
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         bool isVoiceEnabled = BuddyWindowsConfiguration.IsVoiceEnabled;
+        BuddyRuntimeModelSelectionChangedEventArgs modelSelectionSnapshot =
+            BuddyRuntimeModelSelection.CreateSnapshot();
         BuddyLog.Info(isVoiceEnabled
             ? "Voice mode enabled. AssemblyAI and ElevenLabs workflows may run."
             : "Text-only mode enabled. AssemblyAI and ElevenLabs workflows will not run.");
+        BuddyLog.Info(
+            $"Initial Ask Buddy model: {modelSelectionSnapshot.ChatModel.DisplayName} ({modelSelectionSnapshot.ChatModel.Provider}/{modelSelectionSnapshot.ChatModel.Model}). Computer Use model: {modelSelectionSnapshot.ComputerUseDisplayName} ({modelSelectionSnapshot.ComputerUseModel}).");
         pushToTalkHotkeyMonitor = new PushToTalkHotkeyMonitor(isVoiceEnabled);
         pushToTalkHotkeyMonitor.ShutdownHotkeyPressed += HandleShutdownHotkeyPressed;
+        pushToTalkHotkeyMonitor.ChatModelCycleHotkeyPressed += HandleChatModelCycleHotkeyPressed;
         microphoneCaptureService = new MicrophoneCaptureService();
         assemblyAITemporaryTokenClient = new AssemblyAITemporaryTokenClient();
         assemblyAIStreamingTranscriptionService = new AssemblyAIStreamingTranscriptionService(
             assemblyAITemporaryTokenClient);
         windowsScreenCaptureService = new WindowsScreenCaptureService();
+        windowsClipboardTextCaptureService = new WindowsClipboardTextCaptureService();
         claudeStreamingChatClient = new ClaudeStreamingChatClient();
         claudeResponseService = new ClaudeResponseService(
             claudeStreamingChatClient,
-            windowsScreenCaptureService);
+            windowsScreenCaptureService,
+            windowsClipboardTextCaptureService);
         elevenLabsTextToSpeechClient = new ElevenLabsTextToSpeechClient();
         elevenLabsTextToSpeechPlaybackService = new ElevenLabsTextToSpeechPlaybackService(
             elevenLabsTextToSpeechClient);
+        geminiComputerUseClient = new GeminiComputerUseClient();
+        computerUseAgentCoordinator = new ComputerUseAgentCoordinator(
+            geminiComputerUseClient,
+            windowsScreenCaptureService);
         if (isVoiceEnabled)
         {
             pushToTalkVoiceCaptureCoordinator = new PushToTalkVoiceCaptureCoordinator(
@@ -83,14 +95,18 @@ public partial class App : System.Windows.Application
             microphoneCaptureService,
             assemblyAIStreamingTranscriptionService,
             claudeResponseService,
-            elevenLabsTextToSpeechPlaybackService);
+            elevenLabsTextToSpeechPlaybackService,
+            computerUseAgentCoordinator);
         trayIconManager.Initialize();
         companionOverlayController = new CompanionOverlayController(
             pushToTalkHotkeyMonitor,
             microphoneCaptureService,
             assemblyAIStreamingTranscriptionService,
             claudeResponseService,
-            elevenLabsTextToSpeechPlaybackService);
+            elevenLabsTextToSpeechPlaybackService,
+            claudeStreamingChatClient,
+            windowsScreenCaptureService,
+            windowsClipboardTextCaptureService);
         companionOverlayController.Initialize();
         textPromptController = new TextPromptController(
             pushToTalkHotkeyMonitor,
@@ -103,10 +119,6 @@ public partial class App : System.Windows.Application
         // Computer Use action mode (Ctrl+Alt+A): the agent coordinator drives a multi-turn
         // Gemini loop that actually clicks/types/scrolls on the user's behalf, while the
         // existing overlay/pointing flow stays untouched for "just point at it" requests.
-        geminiComputerUseClient = new GeminiComputerUseClient();
-        computerUseAgentCoordinator = new ComputerUseAgentCoordinator(
-            geminiComputerUseClient,
-            windowsScreenCaptureService);
         computerUseActionPromptController = new ComputerUseActionPromptController(
             pushToTalkHotkeyMonitor,
             microphoneCaptureService,
@@ -139,6 +151,7 @@ public partial class App : System.Windows.Application
         if (pushToTalkHotkeyMonitor is not null)
         {
             pushToTalkHotkeyMonitor.ShutdownHotkeyPressed -= HandleShutdownHotkeyPressed;
+            pushToTalkHotkeyMonitor.ChatModelCycleHotkeyPressed -= HandleChatModelCycleHotkeyPressed;
         }
 
         pushToTalkHotkeyMonitor?.Dispose();
@@ -153,6 +166,11 @@ public partial class App : System.Windows.Application
             BuddyLog.Info("Buddy.Windows shutdown requested from Ctrl+Alt+Esc.");
             Shutdown();
         }));
+    }
+
+    private void HandleChatModelCycleHotkeyPressed(object? sender, EventArgs eventArguments)
+    {
+        Dispatcher.BeginInvoke(new Action(BuddyRuntimeModelSelection.CycleChatModel));
     }
 
     private void ReleaseSingleInstanceMutex()
